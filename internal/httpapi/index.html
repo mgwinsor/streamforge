@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Streamforge</title>
+<style>
+:root{font-family:system-ui,sans-serif;color:#18252b;background:#f5f6f7}body{max-width:850px;margin:3rem auto;padding:0 1rem}h1{margin-bottom:.4rem}p{line-height:1.5}form{display:grid;gap:.8rem;border-block:1px solid #ccc;padding:1.5rem 0}input,button{font:inherit;padding:.6rem}input{max-width:100%;box-sizing:border-box}button{cursor:pointer;background:#174b56;color:white;border:0;border-radius:4px}button:disabled{opacity:.6;cursor:wait}label{display:grid;gap:.3rem}li{padding:1rem 0;border-bottom:1px solid #ddd;overflow-wrap:anywhere}li button{margin-left:1rem}video{width:100%;background:#111}#message{min-height:1.5em}small{display:block;color:#46565c}
+</style></head><body>
+<h1>Streamforge</h1><p>Upload a short MP4. Your video is processed in the background into 360p and 720p HLS.</p>
+<form id="upload"><label>Title (optional)<input name="title" maxlength="128"></label><label>MP4 video<input name="file" type="file" accept="video/mp4,.mp4" required></label><small>Up to 60 seconds. Landscape, square pixels, 720p–4K. Request limit: 100 MiB.</small><button id="submit">Upload video</button></form>
+<p id="message" role="status" aria-live="polite"></p>
+<section aria-labelledby="player-title" hidden id="player-section"><h2 id="player-title">Playback</h2><video id="player" controls playsinline></video></section>
+<h2>Recent videos</h2><p id="empty">Loading…</p><ul id="jobs"></ul>
+<script src="https://cdn.jsdelivr.net/npm/hls.js@1.6.13/dist/hls.min.js"></script>
+<script>
+const form=document.querySelector('#upload'), message=document.querySelector('#message'),jobs=document.querySelector('#jobs'),player=document.querySelector('#player');let hls;
+async function json(response){const body=await response.json();if(!response.ok)throw new Error(body.error?.message||'Request failed.');return body;}
+form.addEventListener('submit',async event=>{event.preventDefault();const button=document.querySelector('#submit');button.disabled=true;message.textContent='Uploading…';try{const v=await json(await fetch('/api/videos',{method:'POST',body:new FormData(form)}));message.textContent='Queued video '+v.id;form.reset();await refresh();}catch(err){message.textContent=err.message;}finally{button.disabled=false;}});
+function play(v){if(hls){hls.destroy();hls=null;}document.querySelector('#player-section').hidden=false;document.querySelector('#player-title').textContent=v.title;
+if(player.canPlayType('application/vnd.apple.mpegurl')){player.src=v.playback_url;}else if(window.Hls&&Hls.isSupported()){hls=new Hls();hls.loadSource(v.playback_url);hls.attachMedia(player);hls.on(Hls.Events.ERROR,(_,data)=>{if(data.fatal)message.textContent='Playback failed: '+data.type;});}else{message.textContent='HLS playback is unavailable. Check your browser and the hls.js CDN connection.';}player.focus();}
+async function refresh(){try{const videos=await json(await fetch('/api/videos'));jobs.replaceChildren();document.querySelector('#empty').textContent=videos.length?'':'No videos yet.';for(const v of videos){const li=document.createElement('li'),title=document.createElement('strong'),status=document.createElement('small');title.textContent=v.title;status.textContent=v.status+' · '+new Date(v.created_at).toLocaleString();li.append(title,status);if(v.failure_message){const error=document.createElement('p');error.textContent=v.failure_message;li.append(error);}if(v.status==='ready'){const button=document.createElement('button');button.textContent='Play';button.setAttribute('aria-label','Play '+v.title);button.onclick=()=>play(v);li.append(button);}jobs.append(li);}}catch(err){document.querySelector('#empty').textContent='Could not load jobs: '+err.message;}}
+(async function poll(){await refresh();setTimeout(poll,2000);})();
+</script></body></html>

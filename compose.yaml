@@ -1,0 +1,60 @@
+name: streamforge
+x-app: &app
+  image: streamforge:local
+  build: .
+  environment: &env
+    DATABASE_URL: postgres://streamforge:streamforge@db:5432/streamforge?sslmode=disable
+    DATA_DIR: /data
+    PROBE_TIMEOUT: ${PROBE_TIMEOUT:-15s}
+    TRANSCODE_TIMEOUT: ${TRANSCODE_TIMEOUT:-5m}
+    POLL_INTERVAL: ${POLL_INTERVAL:-1s}
+  volumes:
+    - media:/data
+  depends_on:
+    db:
+      condition: service_healthy
+services:
+  db:
+    image: postgres:17-bookworm
+    environment:
+      POSTGRES_USER: streamforge
+      POSTGRES_PASSWORD: streamforge
+      POSTGRES_DB: streamforge
+    volumes:
+      - postgres:/var/lib/postgresql/data
+      - ./migrations:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: [CMD-SHELL, pg_isready -U streamforge -d streamforge]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+  api:
+    <<: *app
+    command: [api]
+    ports:
+      - "127.0.0.1:${PORT:-8080}:8080"
+    healthcheck:
+      test: [CMD, curl, -fsS, http://localhost:8080/readyz]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    stop_grace_period: 20s
+  worker:
+    <<: *app
+    image: streamforge-worker:local
+    command: [worker]
+    stop_grace_period: 20s
+  tests:
+    profiles: [test]
+    build:
+      context: .
+      target: build
+    environment:
+      TEST_DATABASE_URL: postgres://streamforge:streamforge@db:5432/streamforge?sslmode=disable
+    depends_on:
+      db:
+        condition: service_healthy
+    command: [go, test, -v, ./internal/store]
+volumes:
+  postgres:
+  media:
